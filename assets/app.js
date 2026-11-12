@@ -68,7 +68,7 @@ function tape() { if (!STK.length) return; const h = STK.map(x => `<span data-st
 // the heatmap: sized by today's volume, coloured by today's move
 let heatDone = false;
 function heat() { const H = $('#heat'); if (!STK.length) { H.innerHTML = '<p class="dim">Phoenix is not answering right now.</p>'; return; } const L = STK.slice().sort((a, b) => (b.volUsd || 0) - (a.volUsd || 0)), mx = Math.max(...L.map(x => Math.abs(x.ch24 || 0)), .02);
-  H.innerHTML = L.map((x, i) => { const k = Math.min(1, Math.abs(x.ch24 || 0) / mx), up = (x.ch24 || 0) >= 0, bg = up ? `rgba(92,242,184,${.08 + k * .5})` : `rgba(255,107,107,${.08 + k * .5})`, w = i < 2 ? 'w4' : i < 6 ? 'w3' : i < 14 ? 'w2' : 'w1';
+  H.innerHTML = L.map((x, i) => { const k = Math.min(1, Math.abs(x.ch24 || 0) / mx), up = (x.ch24 || 0) >= 0, bg = up ? `rgba(92,242,184,${.08 + k * .5})` : `rgba(255,107,107,${.08 + k * .5})`, w = i < 3 ? 'w4' : i < 7 ? 'w3' : i < 14 ? 'w2' : 'w1';
     return `<div class="ht ${w}" data-stock="${esc(x.symbol)}" style="background:${bg}"><div><div class="hd">${lg(x.symbol)}<b>${esc(x.symbol)}</b></div><small>${esc(x.name || '')}</small></div><span>${pct(x.ch24, 2)} · $${nf(x.mark, 2)}</span></div>`; }).join('');
   if (!heatDone && window.gsap && !reduced) { heatDone = true; gsap.from($$('.ht', H), { scale: .85, opacity: 0, duration: .8, ease: 'expo.out', stagger: .015, scrollTrigger: { trigger: H, start: 'top 85%' } }); } }
 // the earnings radar: who reports in the next 45 days, on one line
