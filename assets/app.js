@@ -16,7 +16,7 @@ let toastT; const toast = m => { const t = $('#toast'); t.textContent = m; t.cla
 let COINS = [], CONFIG = {}, WALLET = null, NV = null, lenis = null, CUR = 'NVDA', STK = [];
 const FEATURED = ['NVDA', 'TSLA', 'AAPL', 'META', 'GOOGL', 'MSFT', 'AMZN', 'AMD', 'PLTR', 'COIN', 'MSTR', 'SPY', 'QQQ'];
 // real company logos through the engine's cached proxy; a coloured letter badge when one is missing
-const lg = (sym, cls = '') => `<img class="lg ${cls}" src="${API}?a=logo&s=${encodeURIComponent(sym)}" alt="" loading="lazy" decoding="async" data-lg="${esc(sym)}">`;
+const lg = (sym, cls = '') => `<img class="lg ${cls}" src="${API}?a=logo&v=2&s=${encodeURIComponent(sym)}" alt="" loading="lazy" decoding="async" data-lg="${esc(sym)}">`;
 const hue = s => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 document.addEventListener('error', e => { const i = e.target; if (!(i instanceof HTMLImageElement) || !i.dataset.lg) return; const b = document.createElement('span'), h = hue(i.dataset.lg); b.className = i.className + ' ph2'; b.textContent = i.dataset.lg.slice(0, 2); b.style.cssText = `background:hsl(${h} 35% 16%);color:hsl(${h} 80% 76%)`; i.replaceWith(b); }, true);
 const stkOf = sym => STK.find(s => s.symbol === sym) || null;
@@ -267,7 +267,7 @@ preview(); calc(); loadNvda(); loadStocks(); loadCoins(); route();
   let seen = false; try { seen = !!sessionStorage.getItem('mintIntro'); } catch { }
   const webgl = (() => { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); } catch { return false; } })();
   if (reduced || !webgl) return flat();
-  const introOn = !(seen || /^#\/[cs]\//.test(location.hash) || /[?&]nointro/.test(location.search)); if (!introOn) reveal(); else document.body.classList.add('flying');
+  const introOn = !(seen || /^#\/[cs]\//.test(location.hash) || /[?&]nointro/.test(location.search)); if (!introOn) reveal(); else { document.body.classList.add('flying'); try { history.scrollRestoration = 'manual'; } catch { } scrollTo(0, 0); }
   import('./world.js?v=1').then(m => { const w = WORLD = m.createWorld(cv, { intro: introOn, onReveal: reveal, onEnd: () => document.body.classList.remove('flying') });
     if (STK.length) w.setBias((STK.filter(x => x.ch24 > 0).length / STK.length - .5) * 2);
     const sc = () => w.setScroll(scrollY); addEventListener('scroll', sc, { passive: true }); sc();
