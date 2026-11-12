@@ -83,8 +83,11 @@ const rites = fresh => memo('rites', fresh ? 0 : 15000, async () => { let before
   const ok = got.filter(s => !s.err); if (ok.length) { const T = await txs(ok.map(s => s.signature)); let all = true; T.forEach((t, k) => { if (!t) { all = false; return; } const r = parseRite(t, ok[k]); if (r) IDX.rows.set(r.sig, r); }); if (all) IDX.newest = got[0].signature; }
   return [...IDX.rows.values()].sort((a, b) => b.at - a.at); });
 // a launch counts only once its coin exists and only the creator's own rounds count for it
-async function launches(fresh) { const R = await rites(fresh), L = R.filter(r => r.kind === 'launch').sort((a, b) => a.at - b.at), seen = new Set(), o = [];
-  for (const l of L) if (!seen.has(l.mint)) { seen.add(l.mint); o.push(l); } return { R, L: o }; }
+const creatorOfCoin = mint => memo('cr:' + mint, 86400e3, async () => { const SDK = require('@pump-fun/pump-sdk'), bc = await new SDK.OnlinePumpSdk(conn).fetchBondingCurve(new PublicKey(mint)); return bc && bc.creator ? bc.creator.toBase58() : null; });
+async function launches(fresh) { const R = await rites(fresh), L = R.filter(r => r.kind === 'launch').sort((a, b) => a.at - b.at), seen = new Set(), cand = [];
+  for (const l of L) if (!seen.has(l.mint + l.w)) { seen.add(l.mint + l.w); cand.push(l); }
+  const ok = await pool(cand, 6, async l => { try { return (await creatorOfCoin(l.mint)) === l.w; } catch { return false; } }), took = new Set(), o = [];
+  cand.forEach((l, i) => { if (ok[i] && !took.has(l.mint)) { took.add(l.mint); o.push(l); } }); return { R, L: o }; }
 function ledger(R, c) { const mine = R.filter(r => r.mint === c.mint && r.w === c.w); return { funded: mine.filter(r => r.kind === 'fund').reduce((s, r) => s + r.lamports, 0) / 1e9, claimed: mine.filter(r => r.kind === 'claim').reduce((s, r) => s + r.lamports, 0) / 1e9,
   paid: mine.filter(r => r.kind === 'pay').reduce((s, r) => s + r.lamports, 0) / 1e9, payouts: new Set(mine.filter(r => r.kind === 'pay').map(r => r.id)).size, rounds: mine.filter(r => r.kind === 'fund').length, closes: mine.filter(r => r.kind === 'close').length,
   last: mine.length ? Math.max(...mine.map(r => r.at)) : c.at, history: mine.map(r => ({ kind: r.kind, at: r.at, sig: r.sig, sol: r.lamports != null ? r.lamports / 1e9 : null, to: r.to ?? null, part: r.part ?? null })) }; }
@@ -119,8 +122,10 @@ async function buildLaunch(b, req) { const from = pk(b.from, 'connect a wallet f
   const SDK = require('@pump-fun/pump-sdk'), BN = require('bn.js'), online = new SDK.OnlinePumpSdk(conn), global = await online.fetchGlobal(), feeConfig = await online.fetchFeeConfig().catch(() => null);
   const solAmount = new BN(Math.round(dev * 1e9)), amount = SDK.getBuyTokenAmountFromSolAmount({ global, feeConfig, mintSupply: null, bondingCurve: null, amount: solAmount, quoteMint: new PublicKey(SOL) });
   const ixs = await SDK.PUMP_SDK.createV2AndBuyInstructions({ global, mint, name, symbol, uri, creator: from, user: from, amount, solAmount: solAmount.muln(101).divn(100), mayhemMode: false });
-  const t = new Transaction({ feePayer: from, recentBlockhash: b.bh || await bh() }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ...ixs, memoIx(`mint:launch:1:${mint.toBase58()}:${sym}:${side}:${lev}`, from), tagIx(from));
-  return { t, mint: mint.toBase58(), uri, tokens: amount.toString() }; }
+  const hash = b.bh || await bh(); let t = new Transaction({ feePayer: from, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ...ixs);
+  if (!fits(t)) { t = new Transaction({ feePayer: from, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ...ixs); } if (!fits(t)) throw new Error('the launch transaction is too large. shorten the name');
+  const reg = new Transaction({ feePayer: from, recentBlockhash: hash }); reg.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }), memoIx(`mint:launch:1:${mint.toBase58()}:${sym}:${side}:${lev}`, from), tagIx(from));
+  return { t, reg, mint: mint.toBase58(), uri, tokens: amount.toString() }; }
 // the coin's pump.fun metadata: name, ticker, image and the rule, served from the link inside the coin itself
 function metadata(q, req) { const name = clean(q.n, 32), symbol = clean(q.s, 10), d = /^([A-Z]{1,6})-([SL])(\d{1,2})$/.exec(String(q.d || '')) || [], sym = d[1], side = d[2], lev = +d[3], img = Math.max(1, Math.min(CFG.images, +q.i || 1)), h = host(req);
   return { name, symbol, description: side ? `${side === 'S' ? 'Shorts' : 'Longs'} ${sym} at ${lev}x: ${side === 'S' ? 'a hedge against' : 'a bet on'} ${sym}. The creator fees fund the position on Phoenix and profits are paid to holders in SOL. Launched on MINT. Not affiliated with any company it tracks.` : 'Launched on MINT.', image: `${h}/assets/coins/${img}.png`, showName: true, createdOn: h, website: h }; }
@@ -156,7 +161,7 @@ async function sim(q, req) { const kind = String(q.kind || ''), w = pk(q.w, 'add
   const run = async (t, what) => { const t0 = Date.now(), v = (await conn.simulateTransaction(new VersionedTransaction(t.compileMessage()), { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' })).value;
     runs.push({ what, err: v.err ? JSON.stringify(v.err) : null, units: v.unitsConsumed ?? null, ms: Date.now() - t0, bytes: t.serialize({ requireAllSignatures: false, verifySignatures: false }).length, logs: (v.logs || []).filter(l => /Memo|invoke \[1\]|success$|failed|rror|Program log: (Instruction|Error)/.test(l)).slice(-14) }); };
   const hash = '11111111111111111111111111111111';
-  if (kind === 'launch') { const x = await buildLaunch({ from: w.toBase58(), mint: Keypair.generate().publicKey.toBase58(), name: 'dry run', symbol: 'TEST', stock: q.s || SYM, side: q.side || 'S', lev: +q.lev || 5, img: 1, devBuy: 0.01, bh: hash }, req).catch(e => { if (/already runs/.test(e.message)) throw e; throw e; }); await run(x.t, 'pump.fun launch + rule memo'); }
+  if (kind === 'launch') { const x = await buildLaunch({ from: w.toBase58(), mint: Keypair.generate().publicKey.toBase58(), name: 'dry run', symbol: 'TEST', stock: q.s || SYM, side: q.side || 'S', lev: +q.lev || 5, img: 1, devBuy: 0.01, bh: hash }, req).catch(e => { if (/already runs/.test(e.message)) throw e; throw e; }); await run(x.t, 'pump.fun create + first buy'); runs.push({ what: 'rule memo', bytes: x.reg.serialize({ requireAllSignatures: false, verifySignatures: false }).length, err: null, note: 'sent after the coin exists' }); }
   else if (kind === 'order') { const order = await getJ(`${PHX}/v1/ix/place-isolated-market-order`, 15000, { method: 'POST', body: JSON.stringify({ authority: w.toBase58(), symbol: okSym(q.s || SYM), side: q.side === 'buy' ? 'buy' : 'sell', quantity: +q.qty || 0.01, transferSpotCollateralAmounts: q.lam ? { SOL: +q.lam } : undefined, targetLeverage: +q.lev || undefined }) });
     const t = new Transaction({ feePayer: w, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 }), ...order.map(toIx)); await run(t, `${q.s || SYM} ${q.side === 'buy' ? 'long' : 'short'} ${+q.qty || 0.01}`); }
   else if (kind === 'deposit') { const { R, client } = await rise(), lamports = BigInt(+q.lam || 50000000); const flow = await R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client.ixs).catch(() => R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client));
@@ -184,7 +189,7 @@ module.exports = async (req, res) => {
       return out(res, 400, { error: 'unknown action' });
     }
     const b = await body(req);
-    if (a === 'launch') { const x = await buildLaunch(b, req); return out(res, 200, { mint: x.mint, uri: x.uri, tokens: x.tokens, txs: [b64(x.t)] }); }
+    if (a === 'launch') { const x = await buildLaunch(b, req); return out(res, 200, { mint: x.mint, uri: x.uri, tokens: x.tokens, txs: [b64(x.t), b64(x.reg)] }); }
     if (a === 'fund') return out(res, 200, await buildFund(b));
     if (a === 'close') return out(res, 200, await buildClose(b));
     if (a === 'claim') return out(res, 200, await buildClaim(b));
