@@ -124,7 +124,7 @@ $('#launchForm').onsubmit = async e => { e.preventDefault(); const note = $('#lN
   const name = $('#lName').value.trim(), symbol = $('#lSym').value.trim(); if (!name || !symbol) return toast('give the coin a name and a ticker');
   btn.disabled = true; note.className = 'note'; note.textContent = 'building the launch…';
   try { const S = await web3(), kp = S.Keypair.generate(), r = await api('launch', {}, { from: WALLET, mint: kp.publicKey.toBase58(), name, symbol, stock: L.stock, side: L.side, lev: L.lev, img: L.img, devBuy: +$('#lBuy').value });
-    note.textContent = 'sign the launch in your wallet (1 of 2)'; const sig = await signSend(r.txs[0], kp); note.textContent = 'launching…'; await confirm(sig); note.textContent = 'sign the rule in your wallet (2 of 2)'; await confirm(await signSend(r.txs[1]));
+    note.textContent = 'sign the launch in your wallet (1 of 2)'; const sig = await signSend(r.txs[0], kp); note.textContent = 'minting…'; await confirm(sig); note.textContent = 'building your first buy…'; const by = await api('buy', {}, { from: WALLET, mint: r.mint, sol: +$('#lBuy').value }); note.textContent = 'sign your first buy (2 of 2)'; await confirm(await signSend(by.txs[0]));
     note.className = 'note ok'; note.innerHTML = `launched. <a href="https://pump.fun/coin/${esc(r.mint)}" target="_blank" rel="noopener" style="text-decoration:underline">see it on pump.fun</a> · <a href="#/c/${esc(r.mint)}" style="text-decoration:underline">open its page</a>`; toast('your coin is live'); setTimeout(() => loadCoins(1), 4000); }
   catch (err) { note.className = 'note err'; note.textContent = /reject|cancel|denied/i.test(err.message) ? 'you did not sign. nothing happened.' : err.message; } finally { btn.disabled = false; } };
 
