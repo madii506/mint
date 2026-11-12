@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MINT</title>
+<meta name="description" content="Mint a coin that hedges against NVIDIA, or any other stock. Short it as a hedge or long it with leverage. The creator fees fund the position. Holders get paid in SOL.">
+<meta name="theme-color" content="#06090a">
+<meta property="og:title" content="MINT">
+<meta property="og:description" content="Mint a coin that hedges against NVIDIA, or any other stock.">
+<meta property="og:image" content="/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon.png">
+<link rel="preload" href="/assets/fonts/interd-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/jbmono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/mint.css?v=3">
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<nav id="nav">
+  <a class="brand" href="#top" data-go="top"><img src="/favicon.png" alt=""><span>MINT</span></a>
+  <div class="links"><a href="#stocks" data-go="stocks">stocks</a><a href="#launch" data-go="launch">mint</a><a href="#coins" data-go="coins">coins</a><a href="#how" data-go="how">how it works</a><a href="#faq" data-go="faq">faq</a></div>
+  <button class="btn sm" id="connect">connect</button>
+</nav>
+
+<main id="top">
+  <section class="hero">
+    <div class="hero-l">
+      <span class="pill"><i class="dot"></i><span id="mktState">live on Phoenix</span></span>
+      <h1>Mint a coin that hedges against <span class="g">NVIDIA</span>.</h1>
+      <p class="h1b">Or any other stock.</p>
+      <p class="sub">Short a stock as a hedge or long it with leverage. Your coin's creator fees fund the position. Holders get paid in SOL.</p>
+      <div class="row"><a class="btn" href="#launch" data-go="launch">launch a coin</a><a class="btn ghost" href="#coins" data-go="coins">see the coins</a></div>
+    </div>
+    <div class="ticker-card" id="nvdaCard">
+      <div class="stk" id="stk"></div>
+      <div class="tc-top"><div><b id="tcSym">NVDA</b><span id="tcName">perp on Phoenix</span></div><div class="tc-px"><b id="px">—</b><span id="ch">—</span></div></div>
+      <canvas id="chart"></canvas>
+      <div class="tc-stats"><div><span>24h volume</span><b id="vol">—</b></div><div><span>open interest</span><b id="oi">—</b></div><div><span>funding / h</span><b id="fund">—</b></div><div><span>earnings</span><b id="earn">—</b></div></div>
+    </div>
+  </section>
+
+  <section class="tool" id="stocks">
+    <div class="head rv"><span class="kicker">stocks</span><h2>Every stock you can hedge.</h2><p class="lead">Live from Phoenix. Pick one and mint a coin on it.</p></div>
+    <div class="board-bar rv"><input id="sFind" placeholder="search a stock" autocomplete="off"><span class="dim" id="sCount"></span></div>
+    <div class="board rv" id="board"><div class="br th"><span>stock</span><span>price</span><span>24h</span><span>volume</span><span>next earnings</span><span></span></div></div>
+  </section>
+
+  <section class="band" id="how">
+    <div class="head rv"><span class="kicker">how it works</span><h2>Four steps. All on-chain.</h2></div>
+    <div class="steps">
+      <div class="step rv"><span class="n">01</span><h3>Launch</h3><p>Launch a pump.fun coin from MINT and lock its rule forever: pick a stock, then <b>short it</b> (the hedge) or <b>long it</b>, at 2x, 5x or 10x.</p></div>
+      <div class="step rv"><span class="n">02</span><h3>Trade</h3><p>Every trade of the coin pays creator fees in SOL to the creator's wallet, like every pump.fun coin.</p></div>
+      <div class="step rv"><span class="n">03</span><h3>Fund</h3><p>The creator puts those fees into the coin's position on Phoenix, Solana's on-chain perps for stocks, with SOL as collateral.</p></div>
+      <div class="step rv"><span class="n">04</span><h3>Pay</h3><p>When the bet pays, the creator closes it and pays holders in SOL, split by how much they hold. One click, public on-chain.</p></div>
+    </div>
+    <div class="flow rv"><canvas id="flow"></canvas></div>
+  </section>
+
+  <section class="tool" id="launch">
+    <div class="head rv"><span class="kicker">launch</span><h2>Pick a side.</h2><p class="lead">The rule is written into the coin at launch and can never change.</p></div>
+    <div class="launch-grid">
+      <form class="card form rv" id="launchForm" autocomplete="off">
+        <div class="lbl">stock</div>
+        <div class="stocks" id="lStock"></div>
+        <label>name<input id="lName" maxlength="32" placeholder="nvidia hedge"></label>
+        <label>ticker<input id="lSym" maxlength="10" placeholder="HEDGE"></label>
+        <div class="lbl">side</div>
+        <div class="sides" id="lSide"><button type="button" data-v="S" class="on"><b>SHORT <i class="sy">NVDA</i></b><span>the hedge. pays when it falls</span></button><button type="button" data-v="L"><b>LONG <i class="sy">NVDA</i></b><span>the bet. pays when it rises</span></button></div>
+        <div class="lbl">leverage</div>
+        <div class="seg" id="lLev"><button type="button" data-v="2">2x</button><button type="button" data-v="5" class="on">5x</button><button type="button" data-v="10">10x</button></div>
+        <div class="lbl">image</div>
+        <div class="imgs" id="lImg"></div>
+        <label>first buy (SOL)<input id="lBuy" type="number" min="0.01" max="20" step="0.01" value="0.1"></label>
+        <button class="btn wide" id="lGo" type="submit">launch on pump.fun</button>
+        <p class="note" id="lNote">one coin per wallet, so each position belongs to one coin.</p>
+      </form>
+      <div class="preview rv"><div class="coin-card big" id="lPrev"></div><div class="liq" id="lLiq"></div></div>
+    </div>
+  </section>
+
+  <section class="tool" id="math">
+    <div class="head rv"><span class="kicker">hedge math</span><h2>How much covers you?</h2><p class="lead">An estimate before fees, funding and price impact. Not advice.</p></div>
+    <div class="calc rv">
+      <div class="card form"><label>I hold this much of the stock ($)<input id="mHold" type="number" min="0" value="10000"></label><label>if it falls by (%)<input id="mDrop" type="number" min="1" max="90" value="20"></label>
+        <div class="lbl">a coin shorting it at</div><div class="seg" id="mLev"><button type="button" data-v="2">2x</button><button type="button" data-v="5" class="on">5x</button><button type="button" data-v="10">10x</button></div></div>
+      <div class="card calc-out" id="mOut"></div>
+    </div>
+  </section>
+
+  <section class="tool" id="coins">
+    <div class="head rv"><span class="kicker">coins</span><h2>Every MINT coin, live.</h2><p class="lead">Each coin's position is read from Phoenix, and every round and payout from the chain.</p></div>
+    <div class="coin-grid" id="coinGrid"></div>
+  </section>
+
+  <section class="tool" id="faq">
+    <div class="head rv"><span class="kicker">the fine print</span><h2>Questions.</h2></div>
+    <div class="qa rv">
+      <details><summary>Who runs a coin's position?</summary><p>Its creator, from MINT, in their own wallet. MINT never holds a key, a coin or a lamport. Every claim, round, close and payout carries a memo, so each coin's page shows exactly what its creator did and when.</p></details>
+      <details><summary>What is the hedge?</summary><p>A coin set to short a stock gains when that stock falls. If you hold NVIDIA, or anything that moves with it, a coin shorting NVDA pays you SOL in the moments your stock hurts. The same works for Tesla, Apple, the S&amp;P 500 and every other stock Phoenix lists.</p></details>
+      <details><summary>Where does the position live?</summary><p>On Phoenix, Solana's on-chain perps exchange, in the market of the coin's stock, with SOL as collateral. Positions are public. Phoenix asks new wallets to activate with a referral before trading.</p></details>
+      <details><summary>Can a position be wiped out?</summary><p>Yes. Leverage cuts both ways: at 10x, a move of about 10% against the position can liquidate it and the collateral is gone. Holders never lose more than what was put in, but they can get nothing.</p></details>
+      <details><summary>How are holders paid?</summary><p>In SOL, straight to their wallets, split by how much of the coin they hold. Pools and curves are left out. Slices under 0.001 SOL are dropped and the rest re-split.</p></details>
+      <details><summary>What does it cost?</summary><p>pump.fun's normal fees to launch and trade, Phoenix's trading fees on the position, and Solana network fees. MINT takes nothing.</p></details>
+      <details><summary>Is this affiliated with NVIDIA?</summary><p>No. MINT is independent and not affiliated with NVIDIA, any other company it tracks, pump.fun or Phoenix. Each stock is a market on Phoenix that tracks the price of one share. Nothing here is financial advice. Memecoins and leverage can both go to zero.</p></details>
+    </div>
+  </section>
+
+  <section class="close">
+    <img src="/favicon.png" alt="" class="close-mark">
+    <h2 class="rv">Hedge any stock. Get paid in SOL.</h2>
+    <div class="row center rv"><a class="btn" href="#launch" data-go="launch">launch a coin</a><span id="links"></span></div>
+  </section>
+</main>
+
+<div id="page" class="page" hidden><div class="page-in"><button class="x-btn" id="pageClose" aria-label="close">×</button><div id="pageBody"></div></div></div>
+<div id="toast"></div>
+
+<script src="/assets/lenis.min.js"></script>
+<script src="/assets/gsap.min.js"></script>
+<script src="/assets/ScrollTrigger.min.js"></script>
+<script src="/assets/app.js?v=3"></script>
+</body>
+</html>
