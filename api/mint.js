@@ -98,7 +98,7 @@ async function coin(m, fresh) { const mint = pk(m, 'that is not a coin address')
   const [info, pos] = await Promise.all([jupInfo([mint]), position(l.w, l.sym).catch(() => ({ state: 'unknown', open: false }))]);
   return { mint, creator: l.w, sym: l.sym, side: l.side, lev: l.lev, at: l.at, sig: l.sig, coin: info[mint] || null, pos, ...ledger(R, l), at2: Date.now() }; }
 // company logos, by ticker: Parqet's square brand tiles first, FMP second; cached at the edge for a month
-const LOGO_FIX = { SPCX: ['https://www.google.com/s2/favicons?domain=spacex.com&sz=128'], MRVL: ['https://www.google.com/s2/favicons?domain=marvell.com&sz=128'] };
+const LOGO_FIX = { SPCX: ['https://www.google.com/s2/favicons?domain=spacex.com&sz=128'], MRVL: ['https://financialmodelingprep.com/image-stock/MRVL.png'] };
 const logo = sym => memo('logo:' + sym, 86400e3, async () => { for (const u of LOGO_FIX[sym] || [`https://assets.parqet.com/logos/symbol/${sym}?format=png`, `https://financialmodelingprep.com/image-stock/${sym}.png`]) { try { const r = await fetch(u, { signal: AbortSignal.timeout(7000), headers: { 'user-agent': 'Mozilla/5.0 (MINT logo cache)' } }), type = r.headers.get('content-type') || '';
     if (r.ok && /^image\//.test(type)) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length > 200 && buf.length < 2e6) return { type, buf }; } } catch { } } throw new Error('no logo'); });
 // price history for the stock page: 1 day of 15m bars, 1 week of 1h, 1 month of 4h, 3 months of 1d
