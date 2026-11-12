@@ -119,13 +119,17 @@ async function buildLaunch(b, req) { const from = pk(b.from, 'connect a wallet f
   if (await conn.getAccountInfo(mint)) throw new Error('that coin address is taken. try again');
   const { L } = await launches(true); if (L.some(l => l.w === from.toBase58())) throw new Error('this wallet already runs a MINT coin. one coin per wallet, so each position belongs to one coin');
   const uri = `${host(req)}/api/mint?a=t&n=${encodeURIComponent(name)}&s=${symbol}&d=${sym}-${side}${lev}&i=${img}`; if (uri.length > 200) throw new Error('that name is too long for the metadata link. shorten it');
-  const SDK = require('@pump-fun/pump-sdk'), BN = require('bn.js'), online = new SDK.OnlinePumpSdk(conn), global = await online.fetchGlobal(), feeConfig = await online.fetchFeeConfig().catch(() => null);
-  const solAmount = new BN(Math.round(dev * 1e9)), amount = SDK.getBuyTokenAmountFromSolAmount({ global, feeConfig, mintSupply: null, bondingCurve: null, amount: solAmount, quoteMint: new PublicKey(SOL) });
-  const ixs = await SDK.PUMP_SDK.createV2AndBuyInstructions({ global, mint, name, symbol, uri, creator: from, user: from, amount, solAmount: solAmount.muln(101).divn(100), mayhemMode: false });
-  const hash = b.bh || await bh(); let t = new Transaction({ feePayer: from, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ...ixs);
-  if (!fits(t)) { t = new Transaction({ feePayer: from, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ...ixs); } if (!fits(t)) throw new Error('the launch transaction is too large. shorten the name');
-  const reg = new Transaction({ feePayer: from, recentBlockhash: hash }); reg.add(ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }), memoIx(`mint:launch:1:${mint.toBase58()}:${sym}:${side}:${lev}`, from), tagIx(from));
-  return { t, reg, mint: mint.toBase58(), uri, tokens: amount.toString() }; }
+  // pump.fun's create and the rule go in one transaction; the first buy follows in its own (create and buy together are over Solana's size limit)
+  const SDK = require('@pump-fun/pump-sdk'), ix = await SDK.PUMP_SDK.createV2Instruction({ mint, name, symbol, uri, creator: from, user: from, mayhemMode: false });
+  const hash = b.bh || await bh(), rule = memoIx(`mint:launch:1:${mint.toBase58()}:${sym}:${side}:${lev}`, from); let t = new Transaction({ feePayer: from, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ix, rule, tagIx(from));
+  if (!fits(t)) throw new Error('the launch transaction is too large. shorten the name');
+  return { t, mint: mint.toBase58(), uri, dev }; }
+// the first buy, built once the coin exists, from its live bonding curve
+async function buildBuy(b) { const from = pk(b.from, 'connect a wallet first'), mint = pk(b.mint, 'that is not a coin address'), sol = +b.sol; if (!(sol >= .01 && sol <= 20)) throw new Error('the first buy must be between 0.01 and 20 SOL');
+  const SDK = require('@pump-fun/pump-sdk'), BN = require('bn.js'), online = new SDK.OnlinePumpSdk(conn), [global, feeConfig, state] = await Promise.all([online.fetchGlobal(), online.fetchFeeConfig().catch(() => null), online.fetchBuyState(mint, from)]);
+  const solAmount = new BN(Math.round(sol * 1e9)), amount = SDK.getBuyTokenAmountFromSolAmount({ global, feeConfig, mintSupply: state.bondingCurve.tokenTotalSupply, bondingCurve: state.bondingCurve, amount: solAmount });
+  const mi = await mintInfo(mint.toBase58()), ixs = await SDK.PUMP_SDK.buyInstructions({ global, ...state, mint, user: from, amount, solAmount, slippage: 2, tokenProgram: new PublicKey(mi.program) });
+  const t = new Transaction({ feePayer: from, recentBlockhash: await bh() }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }), ...ixs); return { txs: [b64(t)], tokens: amount.toString() }; }
 // the coin's pump.fun metadata: name, ticker, image and the rule, served from the link inside the coin itself
 function metadata(q, req) { const name = clean(q.n, 32), symbol = clean(q.s, 10), d = /^([A-Z]{1,6})-([SL])(\d{1,2})$/.exec(String(q.d || '')) || [], sym = d[1], side = d[2], lev = +d[3], img = Math.max(1, Math.min(CFG.images, +q.i || 1)), h = host(req);
   return { name, symbol, description: side ? `${side === 'S' ? 'Shorts' : 'Longs'} ${sym} at ${lev}x: ${side === 'S' ? 'a hedge against' : 'a bet on'} ${sym}. The creator fees fund the position on Phoenix and profits are paid to holders in SOL. Launched on MINT. Not affiliated with any company it tracks.` : 'Launched on MINT.', image: `${h}/assets/coins/${img}.png`, showName: true, createdOn: h, website: h }; }
@@ -161,7 +165,7 @@ async function sim(q, req) { const kind = String(q.kind || ''), w = pk(q.w, 'add
   const run = async (t, what) => { const t0 = Date.now(), v = (await conn.simulateTransaction(new VersionedTransaction(t.compileMessage()), { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' })).value;
     runs.push({ what, err: v.err ? JSON.stringify(v.err) : null, units: v.unitsConsumed ?? null, ms: Date.now() - t0, bytes: t.serialize({ requireAllSignatures: false, verifySignatures: false }).length, logs: (v.logs || []).filter(l => /Memo|invoke \[1\]|success$|failed|rror|Program log: (Instruction|Error)/.test(l)).slice(-14) }); };
   const hash = '11111111111111111111111111111111';
-  if (kind === 'launch') { const x = await buildLaunch({ from: w.toBase58(), mint: Keypair.generate().publicKey.toBase58(), name: 'dry run', symbol: 'TEST', stock: q.s || SYM, side: q.side || 'S', lev: +q.lev || 5, img: 1, devBuy: 0.01, bh: hash }, req).catch(e => { if (/already runs/.test(e.message)) throw e; throw e; }); await run(x.t, 'pump.fun create + first buy'); runs.push({ what: 'rule memo', bytes: x.reg.serialize({ requireAllSignatures: false, verifySignatures: false }).length, err: null, note: 'sent after the coin exists' }); }
+  if (kind === 'launch') { const x = await buildLaunch({ from: w.toBase58(), mint: Keypair.generate().publicKey.toBase58(), name: 'dry run', symbol: 'TEST', stock: q.s || SYM, side: q.side || 'S', lev: +q.lev || 5, img: 1, devBuy: 0.01, bh: hash }, req).catch(e => { if (/already runs/.test(e.message)) throw e; throw e; }); await run(x.t, 'pump.fun create + rule'); }
   else if (kind === 'order') { const order = await getJ(`${PHX}/v1/ix/place-isolated-market-order`, 15000, { method: 'POST', body: JSON.stringify({ authority: w.toBase58(), symbol: okSym(q.s || SYM), side: q.side === 'buy' ? 'buy' : 'sell', quantity: +q.qty || 0.01, transferSpotCollateralAmounts: q.lam ? { SOL: +q.lam } : undefined, targetLeverage: +q.lev || undefined }) });
     const t = new Transaction({ feePayer: w, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 }), ...order.map(toIx)); await run(t, `${q.s || SYM} ${q.side === 'buy' ? 'long' : 'short'} ${+q.qty || 0.01}`); }
   else if (kind === 'deposit') { const { R, client } = await rise(), lamports = BigInt(+q.lam || 50000000); const flow = await R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client.ixs).catch(() => R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client));
@@ -189,7 +193,8 @@ module.exports = async (req, res) => {
       return out(res, 400, { error: 'unknown action' });
     }
     const b = await body(req);
-    if (a === 'launch') { const x = await buildLaunch(b, req); return out(res, 200, { mint: x.mint, uri: x.uri, tokens: x.tokens, txs: [b64(x.t), b64(x.reg)] }); }
+    if (a === 'launch') { const x = await buildLaunch(b, req); return out(res, 200, { mint: x.mint, uri: x.uri, txs: [b64(x.t)] }); }
+    if (a === 'buy') return out(res, 200, await buildBuy(b));
     if (a === 'fund') return out(res, 200, await buildFund(b));
     if (a === 'close') return out(res, 200, await buildClose(b));
     if (a === 'claim') return out(res, 200, await buildClaim(b));
