@@ -97,6 +97,14 @@ async function coins(fresh) { const { R, L } = await launches(fresh), info = awa
 async function coin(m, fresh) { const mint = pk(m, 'that is not a coin address').toBase58(), { R, L } = await launches(fresh), l = L.find(x => x.mint === mint); if (!l) throw new Error('that coin was not launched on MINT');
   const [info, pos] = await Promise.all([jupInfo([mint]), position(l.w, l.sym).catch(() => ({ state: 'unknown', open: false }))]);
   return { mint, creator: l.w, sym: l.sym, side: l.side, lev: l.lev, at: l.at, sig: l.sig, coin: info[mint] || null, pos, ...ledger(R, l), at2: Date.now() }; }
+// company logos, by ticker: Parqet's square brand tiles first, FMP second; cached at the edge for a month
+const LOGO_FIX = { SPCX: ['https://www.google.com/s2/favicons?domain=spacex.com&sz=128'], MRVL: ['https://www.google.com/s2/favicons?domain=marvell.com&sz=128'] };
+const logo = sym => memo('logo:' + sym, 86400e3, async () => { for (const u of LOGO_FIX[sym] || [`https://assets.parqet.com/logos/symbol/${sym}?format=png`, `https://financialmodelingprep.com/image-stock/${sym}.png`]) { try { const r = await fetch(u, { signal: AbortSignal.timeout(7000), headers: { 'user-agent': 'Mozilla/5.0 (MINT logo cache)' } }), type = r.headers.get('content-type') || '';
+    if (r.ok && /^image\//.test(type)) { const buf = Buffer.from(await r.arrayBuffer()); if (buf.length > 200 && buf.length < 2e6) return { type, buf }; } } catch { } } throw new Error('no logo'); });
+// price history for the stock page: 1 day of 15m bars, 1 week of 1h, 1 month of 4h, 3 months of 1d
+const TF = { '1d': ['15m', 1.1], '1w': ['1h', 8], '1m': ['4h', 31], '3m': ['1d', 92] };
+const bars = (sym, tf) => memo(`bars:${sym}:${tf}`, tf === '1d' ? 30000 : 300000, async () => { const [t, days] = TF[tf], now = Date.now(), c = await phx(`/v1/candles_v2/${sym}?timeframe=${t}&from=${Math.round(now - days * 86400e3)}&to=${now}&limit=500`);
+  return { symbol: sym, tf, bars: (c.bars || []).map(b => [b.time, +(b.markClose ?? b.close)]).filter(b => b[1] > 0) }; });
 const ping = () => memo('ping', 4000, async () => { const t0 = Date.now(), slot = await conn.getSlot('confirmed'); return { slot, ms: Date.now() - t0, rpc: process.env.RPC_URL ? 'custom' : 'public', tag: TAG58, at: Date.now() }; });
 
 // ---------------------------------------------------------------- holders, for payouts
@@ -189,6 +197,8 @@ module.exports = async (req, res) => {
       if (a === 'coin') return out(res, 200, await coin(q.mint, fresh), fresh ? 'no-store' : 'public, max-age=8, s-maxage=10, stale-while-revalidate=60');
       if (a === 'position') return out(res, 200, await position(pk(q.w).toBase58(), okSym(q.s || SYM)), 'no-store');
       if (a === 'access') return out(res, 200, await access(pk(q.w).toBase58()), 'no-store');
+      if (a === 'bars') { const tf = TF[q.tf] ? q.tf : '1w'; return out(res, 200, await bars(okSym(q.s || SYM), tf), tf === '1d' ? 'public, max-age=20, s-maxage=30, stale-while-revalidate=120' : 'public, max-age=120, s-maxage=300, stale-while-revalidate=900'); }
+      if (a === 'logo') { const im = await logo(okSym(q.s)); res.statusCode = 200; res.setHeader('content-type', im.type); res.setHeader('cache-control', 'public, max-age=604800, s-maxage=2592000, immutable'); return res.end(im.buf); }
       if (a === 'status') { const v = (await conn.getSignatureStatuses([String(q.sig || '')], { searchTransactionHistory: false })).value[0]; return out(res, 200, { status: v ? (v.err ? 'failed' : v.confirmationStatus) : null, err: v && v.err ? JSON.stringify(v.err) : null }); }
       if (a === 'fees') return out(res, 200, await fees(pk(q.w).toBase58()), 'no-store');
       if (a === 't') return out(res, 200, metadata(q, req), 'public, max-age=86400, s-maxage=31536000, immutable');
