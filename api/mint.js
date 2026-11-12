@@ -106,7 +106,10 @@ async function holdersOf(mint) { const mi = await mintInfo(mint), filters = [{ m
   return { ...mi, map }; }
 
 // ---------------------------------------------------------------- the transactions the creator signs
-let RISE = null; const rise = () => RISE || (RISE = (async () => { const R = await import('@ellipsis-labs/rise'); return { R, client: R.createPhoenixClient({ apiUrl: PHX, rpcUrl: RPCS[0] }) }; })().catch(e => { RISE = null; throw e; }));
+// the SDK's instruction flows need Phoenix's program addresses and a way to read accounts: ours, over our own RPC
+let RISE = null; const rise = () => RISE || (RISE = (async () => { const R = await import('@ellipsis-labs/rise');
+  const ix = { addresses: R.resolvePhoenixBuilderAddresses(), fetchAccount: async a => { const i = await conn.getAccountInfo(new PublicKey(String(a))); if (!i) throw new Error('Phoenix account not found: ' + a); return { data: new Uint8Array(i.data) }; } };
+  return { R, client: ix }; })().catch(e => { RISE = null; throw e; }));
 // Phoenix returns web3-style instructions; the SDK returns @solana/kit ones (role 0 read, 1 write, 2 read+sign, 3 write+sign)
 const toIx = ix => ix.programId && ix.keys ? new TransactionInstruction({ programId: new PublicKey(ix.programId), keys: ix.keys.map(k => ({ pubkey: new PublicKey(k.pubkey), isSigner: !!k.isSigner, isWritable: !!k.isWritable })), data: Buffer.from(ix.data) })
   : new TransactionInstruction({ programId: new PublicKey(ix.programAddress || ix.programId), keys: (ix.accounts || []).map(a => ({ pubkey: new PublicKey(a.address), isSigner: a.role >= 2, isWritable: a.role === 1 || a.role === 3 })), data: Buffer.from(ix.data || []) });
@@ -138,7 +141,7 @@ async function buildFund(b) { const from = pk(b.from, 'connect a wallet first'),
   const acc = await access(w); if (!acc.ready) throw new Error('activate this wallet on Phoenix first');
   const [n, { R, client }, hash] = await Promise.all([stock(l.sym), rise(), bh()]), lamports = Math.round(sol * 1e9), usd = sol * (n.sol || 0); if (!n.sol || !n.mark) throw new Error('prices are not available right now. try again in a minute');
   const qty = Math.floor(usd * l.lev * 0.85 / n.mark * 1000) / 1000; if (qty < 0.001) throw new Error(`that is too little SOL for a thousandth of a ${l.sym} share. fund more`);
-  const flow = await R.buildNativeSolDepositFlow({ authority: w, lamports: BigInt(lamports) }, client.ixs).catch(async e => { try { return await R.buildNativeSolDepositFlow({ authority: w, lamports: BigInt(lamports) }, client); } catch { throw e; } });
+  const flow = await R.buildNativeSolDepositFlow({ authority: w, lamports: BigInt(lamports) }, client);
   const t1 = new Transaction({ feePayer: from, recentBlockhash: hash }); t1.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }), ...flow.instructions.map(toIx), memoIx(`mint:fund:1:${mint}:${lamports}`, from), tagIx(from));
   const order = await getJ(`${PHX}/v1/ix/place-isolated-market-order`, 15000, { method: 'POST', body: JSON.stringify({ authority: w, symbol: l.sym, side: l.side === 'S' ? 'sell' : 'buy', quantity: qty, transferSpotCollateralAmounts: { SOL: lamports }, targetLeverage: l.lev }) });
   const t2 = new Transaction({ feePayer: from, recentBlockhash: hash }); t2.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 50000 }), ...order.map(toIx));
@@ -168,7 +171,7 @@ async function sim(q, req) { const kind = String(q.kind || ''), w = pk(q.w, 'add
   if (kind === 'launch') { const x = await buildLaunch({ from: w.toBase58(), mint: Keypair.generate().publicKey.toBase58(), name: 'dry run', symbol: 'TEST', stock: q.s || SYM, side: q.side || 'S', lev: +q.lev || 5, img: 1, devBuy: 0.01, bh: hash }, req).catch(e => { if (/already runs/.test(e.message)) throw e; throw e; }); await run(x.t, 'pump.fun create + rule'); }
   else if (kind === 'order') { const order = await getJ(`${PHX}/v1/ix/place-isolated-market-order`, 15000, { method: 'POST', body: JSON.stringify({ authority: w.toBase58(), symbol: okSym(q.s || SYM), side: q.side === 'buy' ? 'buy' : 'sell', quantity: +q.qty || 0.01, transferSpotCollateralAmounts: q.lam ? { SOL: +q.lam } : undefined, targetLeverage: +q.lev || undefined }) });
     const t = new Transaction({ feePayer: w, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1000000 }), ...order.map(toIx)); await run(t, `${q.s || SYM} ${q.side === 'buy' ? 'long' : 'short'} ${+q.qty || 0.01}`); }
-  else if (kind === 'deposit') { const { R, client } = await rise(), lamports = BigInt(+q.lam || 50000000); const flow = await R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client.ixs).catch(() => R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client));
+  else if (kind === 'deposit') { const { R, client } = await rise(), lamports = BigInt(+q.lam || 50000000); const flow = await R.buildNativeSolDepositFlow({ authority: w.toBase58(), lamports }, client);
     const t = new Transaction({ feePayer: w, recentBlockhash: hash }); t.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 300000 }), ...flow.instructions.map(toIx)); await run(t, `deposit ${Number(lamports) / 1e9} SOL to Phoenix`); }
   else if (kind === 'pay') { const fresh = Array.from({ length: CFG.perTx }, () => [Keypair.generate().publicKey.toBase58(), MIN_LAMPORTS]); for (const x of payBatches(w, q.mint ? pk(q.mint).toBase58() : SOL, fresh, 'selftest', hash)) await run(x.t, `pay ${x.part.length} new wallets`); }
   else throw new Error('kind is launch, order, deposit or pay');
